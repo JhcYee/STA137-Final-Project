@@ -1,0 +1,16 @@
+---
+title: "STA137 Final Project"
+author: "Justin Yee"
+date: "2026-06-04"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+EDA
+```{r}
+df = 
+```
+
