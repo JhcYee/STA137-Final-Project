@@ -9,8 +9,82 @@ output: pdf_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+Libraries
+```{r}
+library(zoo)
+library(forecast)
+
+```
+
 EDA
 ```{r}
-df = 
+df = read.csv("~/Documents/STA137_Final/Temp_NH_1850_2025.csv")
+colnames(df) <- c("Year", "TempAnomaly")
+str(df)
+print(paste0("# of NA's: ", sum(is.na(df))))
+min(df$TempAnomaly)
+max(df$TempAnomaly)
+# Temp Anomaly Distribution Chart
+hist(df$TempAnomaly, 
+     main = "Temperature Anomaly Distribution", 
+     xlab = "Temperature Anomaly")
+
+# Create a time series object
+temp.ts <- ts(
+  df$TempAnomaly,
+  start = 1850,
+  frequency = 1
+)
+
+# Time series plot
+plot(
+  temp.ts,
+  type = "l",
+  col = "blue",
+  lwd = 2,
+  xlab = "Year",
+  ylab = "Temperature Anomaly",
+  main = "Northern Hemisphere Temperature Anomalies"
+)
+
+# Boxplot
+boxplot(
+  temp.ts,
+  main = "Boxplot of Temperature Anomalies",
+  col = "lightgreen"
+)
+
+# Moving Average plot
+ma10 <- rollmean(temp.ts,
+                 k = 10,
+                 fill = NA)
+
+plot(temp.ts,
+     type = "l",
+     main = "Temperature Anomalies with 10-Year Moving Average",
+     ylab = "Temperature Anomaly",
+     xlab = "Year")
+
+lines(ma10,
+      col = "red",
+      lwd = 3)
+```
+ACF and PACF
+```{r}
+# ACF and PACF charts
+acf(temp.ts,
+    main = "ACF of Temperature Anomalies")
+pacf(temp.ts,
+     main = "PACF of Temperature Anomalies")
+```
+
+ARIMA Model Fitting
+```{r}
+auto.arima(temp.ts)
+AIC(arima(temp.ts, order=c(2,1,2)))
+AIC(arima(temp.ts, order=c(2,1,1)))
+AIC(arima(temp.ts, order=c(1,1,2)))
+AIC(arima(temp.ts, order=c(3,1,3)))
+# ARIMA(2,1,2) maybe??? Check more Arigato
 ```
 
