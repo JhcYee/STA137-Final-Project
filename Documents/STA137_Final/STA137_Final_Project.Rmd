@@ -13,17 +13,20 @@ Libraries
 ```{r}
 library(zoo)
 library(forecast)
-
+library(dplyr)
+library(Hmisc)
 ```
 
 EDA
 ```{r}
-df = read.csv("~/Documents/STA137_Final/Temp_NH_1850_2025.csv")
+df = read.csv("~/STA137-Final-Project/Documents/STA137_Final/Temp_NH_1850_2025.csv", header = FALSE)
+
 colnames(df) <- c("Year", "TempAnomaly")
 str(df)
 print(paste0("# of NA's: ", sum(is.na(df))))
 min(df$TempAnomaly)
 max(df$TempAnomaly)
+df
 # Temp Anomaly Distribution Chart
 hist(df$TempAnomaly, 
      main = "Temperature Anomaly Distribution", 
@@ -71,20 +74,401 @@ lines(ma10,
 ```
 ACF and PACF
 ```{r}
+#Obtain the appropriate ACF and PACF plots, and use these to make a preliminary identification of a time series model.
 # ACF and PACF charts
 acf(temp.ts,
     main = "ACF of Temperature Anomalies")
+
 pacf(temp.ts,
      main = "PACF of Temperature Anomalies")
+
+temp.diff = diff(temp.ts) #we diff because the og data has strong trend and not stationary and ARIMA works best stationary
+
+plot(
+  temp.diff,
+  type = "l",
+  xlab = "Year",
+  ylab = "Change in Temperature Anomaly",
+  main = "First-Differenced Temperature Anomalies")
+
+acf(
+  temp.diff,
+  main = "ACF of Differenced Temperature Anomalies")
+
+pacf(
+  temp.diff,
+  main = "PACF of Differenced Temperature Anomalies")
 ```
 
 ARIMA Model Fitting
 ```{r}
-auto.arima(temp.ts)
-AIC(arima(temp.ts, order=c(2,1,2)))
-AIC(arima(temp.ts, order=c(2,1,1)))
-AIC(arima(temp.ts, order=c(1,1,2)))
-AIC(arima(temp.ts, order=c(3,1,3)))
-# ARIMA(2,1,2) maybe??? Check more Arigato
+#Fit an ARIMA model obtained via preliminary identification, and examine the residuals and their properties.
+
+fit_prelim = Arima(
+  temp.ts,
+  order = c(0,1,2),
+  method = "ML"
+)
+
+res_prelim =  residuals(fit_prelim)
+
+# Residual time-series plot
+plot(
+  res_prelim,
+  type = "l",
+  xlab = "Year",
+  ylab = "Residual",
+  main = "Residuals from Preliminary ARIMA Model"
+)
+
+abline(h = 0, lty = 2)
+
+# Residual ACF
+acf(
+  res_prelim,
+  main = "ACF of Preliminary-Model Residuals"
+)
+
+# Histogram
+hist(
+  res_prelim,
+  main = "Histogram of Preliminary-Model Residuals",
+  xlab = "Residual"
+)
+
+# Normal probability plot
+qqnorm(
+  res_prelim,
+  main = "Normal Probability Plot of Preliminary-Model Residuals"
+)
+
+qqline(res_prelim)
+
+checkresiduals(fit_prelim) #this is all for checking the properties of the residuals 
+```
+
+Selecting Final Model Using AIC
+```{r}
+#Select the final model using the model selection criterion AIC. 
+
+#Create table for AIC values and each pq combination
+aic.table = expand.grid(
+  p = 0:3,
+  q = 0:3)
+
+#Placeholder Column for the AIC values 
+aic.table$AIC = NA
+
+#Fit each combination of model, compute AIC and put it in table
+for (i in 1:nrow(aic.table)) {
+  
+  current.fit = tryCatch(
+    Arima(
+      temp.ts,
+      order = c(aic.table$p[i], 1, aic.table$q[i]),
+      method = "ML"),
+    error = function(e) NULL)
+  
+  if (!is.null(current.fit)) {
+    aic.table$AIC[i] = AIC(current.fit)
+  }
+}
+aic.table #Please present a table with values of the criterion function you have used.
+
+aic.table %>% #lowest AIC = final model
+  filter(AIC == min(AIC)) #p=3, q=0, AIC=-193.52
+#------------------------------------
+
+# Fit the final model
+final_model = Arima(
+  temp.ts,
+  order = c(3, 1, 0),
+  method = "ML")
+
+final_model
+```
+
+```{r}
+#Perform the necessary diagnostics on the residuals of the final model 
+
+res_final <- residuals(final_model)
+
+# Residual time-series plot
+plot(
+  res_final,
+  type = "l",
+  xlab = "Year",
+  ylab = "Residual",
+  main = "Residuals from Final ARIMA Model")
+
+abline(h = 0, lty = 2)
+
+# Residual ACF
+acf(
+  res_final,
+  main = "ACF of Final-Model Residuals")
+
+# Histogram
+hist(
+  res_final,
+  main = "Histogram of Final-Model Residuals",
+  xlab = "Residual")
+
+# Normal probability plot
+qqnorm(
+  res_final,
+  main = "Normal Probability Plot of Final-Model Residuals")
+
+qqline(res_final)
+
+# Ljung-Box test
+Box.test(
+  res_final,
+  lag = 10,
+  type = "Ljung-Box",
+  fitdf = 3 + 0)
+
+# Convenient combined residual diagnostic plot
+checkresiduals(final_model)
+```
+
+```{r}
+#Write down the final model, the estimated parameters and the standard errors.
+
+final_model #ARIMA(3,1,0)
+
+coef.table = data.frame(
+  Estimate = as.numeric(final_model$coef),
+  Standard_Error = sqrt(diag(final_model$var.coef)))
+
+coef.table
+```
+
+```{r}
+#Refit the final model 
+train.ts = window(temp.ts, end = 2019)
+test.ts = window(temp.ts, start = 2020)
+
+fit_train = Arima(
+  train.ts,
+  order = c(3, 1, 0),
+  method = "ML")
+
+forecast_last6 = forecast(fit_train, h = 6)
+
+forecast.table = data.frame( #made a table to compare actual and forecasted values
+  Year = 2020:2025,
+  Actual = as.numeric(test.ts),
+  Forecast = as.numeric(forecast_last6$mean))
+
+forecast.table
+```
+
+```{r}
+#It is sometimes desirable to compare forecasting by different methods.
+
+train_df = df[df$Year <= 2019, ] #from 1850-2019
+test_df = df[df$Year >= 2020, ] #from 2020-2025
+
+loess_fit = loess(TempAnomaly ~ Year, data = train_df)
+
+summary(loess_fit)
+
+train_df$Trend = fitted(loess_fit)
+
+plot(
+  train.df$Year,
+  train.df$TempAnomaly,
+  type = "l",
+  xlab = "Year",
+  ylab = "Temperature Anomaly",
+  main = "Temperature Anomalies and Fitted LOESS Trend")
+
+lines(
+  train.df$Year,
+  train.df$Trend,
+  col = "red",
+  lwd = 3)
+
+legend(
+  "topleft",
+  legend = c("Observed Temperature Anomaly", "LOESS Trend"),
+  col = c("black", "red"),
+  lty = 1,
+  lwd = c(1, 3))
+
+train.df$Rough = train.df$TempAnomaly - train.df$Trend
+
+rough.ts = ts( #create ts object for rough
+  train.df$Rough,
+  start = 1850,
+  frequency = 1)
+
+plot( #rough against time
+  rough.ts,
+  type = "l",
+  xlab = "Year",
+  ylab = "Rough",
+  main = "Rough After Removing the LOESS Trend")
+
+abline(h = 0, lty = 2)
+
+acf(rough.ts, main = "ACF of the Rough")
+
+pacf(rough.ts, main = "PACF of the Rough")
+
+#Same thing as above creating all possible cases for p and q between 0 and 3
+arma.aic.table = expand.grid(
+  p = 0:3,
+  q = 0:3
+)
+
+arma.aic.table$AIC = NA
+
+# Fit each ARMA(p, q) model to the rough
+for (i in 1:nrow(arma.aic.table)) {
+  
+  current.fit <- tryCatch(
+    Arima(
+      rough.ts,
+      order = c(
+        arma.aic.table$p[i],
+        0,
+        arma.aic.table$q[i]
+      ),
+      method = "ML"
+    ),
+    error = function(e) NULL
+  )
+  
+  if (!is.null(current.fit)) {
+    arma.aic.table$AIC[i] <- AIC(current.fit)
+  }
+}
+
+arma.aic.table
+
+lowest_rough_AIC = arma.aic.table %>% #best fit is p=1, q=0, AIC=-209.5037
+  filter(AIC == min(AIC))
+
+fit_rough_final = Arima(
+  rough.ts,
+  order = c(1,0,0),
+  method = "ML")
+
+fit_rough_final
+```
+
+```{r}
+#Forecast the temperature anomalies for the years 2020-2025 by guessing the trend for these years
+
+forecast_years = c(2020, 2021, 2022, 2023, 2024, 2025)
+
+trend.forecast.output = approxExtrap(
+  x = train.df$Year,
+  y = train.df$Trend,
+  xout = forecast.years)
+
+trend.forecast = trend.forecast.output$y
+
+loess.arma.forecast = trend.forecast + as.numeric(rough.forecast$mean)
+
+loess.arma.table = data.frame(
+  Year = forecast.years,
+  Extrapolated_Trend = trend.forecast,
+  Forecasted_Rough = as.numeric(rough.forecast$mean),
+  Forecasted_Anomaly = loess.arma.forecast,
+  Actual_Anomaly = test.df$TempAnomaly)
+
+loess.arma.table
+
+comparison_table = data.frame(
+  Year = forecast.years,
+  Actual = test.df$TempAnomaly,
+  ARIMA_Forecast = as.numeric(forecast_last6$mean),
+  LOESS_ARMA_Forecast = loess.arma.forecast
+)
+
+comparison_table
+```
+
+```{r}
+# Start forecast lines at 2019 so that they connect visually
+plot.years <- c(2019, forecast.years)
+
+last.observed <- train.df$TempAnomaly[nrow(train.df)]
+
+arima.plot.values <- c(
+  last.observed,
+  as.numeric(forecast_last6$mean)
+)
+
+loess.arma.plot.values <- c(
+  last.observed,
+  loess.arma.forecast
+)
+
+# Plot observed anomalies
+plot(
+  df$Year,
+  df$TempAnomaly,
+  type = "l",
+  xlim = c(2000, 2025),
+  xlab = "Year",
+  ylab = "Temperature Anomaly",
+  main = "Observed and Forecasted Temperature Anomalies"
+)
+
+# Add observed values as points for 2020–2025
+points(
+  test.df$Year,
+  test.df$TempAnomaly,
+  pch = 16
+)
+
+# Add direct ARIMA forecasts
+lines(
+  plot.years,
+  arima.plot.values,
+  col = "blue",
+  lwd = 2,
+  lty = 2
+)
+
+points(
+  forecast.years,
+  as.numeric(forecast_last6$mean),
+  col = "blue",
+  pch = 17
+)
+
+# Add LOESS trend + ARMA rough forecasts
+lines(
+  plot.years,
+  loess.arma.plot.values,
+  col = "red",
+  lwd = 2,
+  lty = 3
+)
+
+points(
+  forecast.years,
+  loess.arma.forecast,
+  col = "red",
+  pch = 15
+)
+
+legend(
+  "topleft",
+  legend = c(
+    "Observed",
+    "Direct ARIMA Forecast",
+    "LOESS Trend + ARMA Rough Forecast"
+  ),
+  col = c("black", "blue", "red"),
+  lty = c(1, 2, 3),
+  pch = c(16, 17, 15),
+  lwd = c(1, 2, 2)
+)
 ```
 
